@@ -67,6 +67,9 @@ export default async function handler(req, res) {
         let processedPath = fullPath;
         if (processedPath.startsWith('/github.com/')) {
           processedPath = processedPath.substring('/github.com'.length);
+        } else if (processedPath.startsWith('/https://github.com/')) {
+          // 添加对 https:// 前缀的处理
+          processedPath = processedPath.substring('/https:'.length);
         }
 
         // 确保 Git 仓库路径以 .git 结尾
@@ -129,8 +132,13 @@ async function proxyRequest(req, res, targetUrl, redirectCount = 0) {
     'cloud.githubusercontent.com'
   ];
 
-  const isAllowed = allowedDomains.some(domain => hostname.includes(domain)) ||
-    (pathname.includes('github-production-release-asset') && hostname === req.headers['x-forwarded-host']);
+  const isAllowed = allowedDomains.some(domain => {
+    // 精确匹配或子域名匹配
+    return hostname === domain ||
+      hostname.endsWith('.' + domain) ||
+      // 对于包含破折号的域名，使用 includes 检查
+      domain.includes('-') && hostname.includes(domain);
+  });
 
   if (!isAllowed) {
     console.log('域名不被允许:', hostname, '路径:', pathname);
@@ -151,6 +159,10 @@ async function proxyRequest(req, res, targetUrl, redirectCount = 0) {
     }
   };
 
+  delete options.headers['x-forwarded-host'];
+  delete options.headers['x-forwarded-proto'];
+  delete options.headers['x-forwarded-for'];
+
   // 检测并处理 Git 智能协议
   const isGitRequest = pathname.endsWith('.git') ||
     pathname.includes('/info/refs') ||
@@ -164,6 +176,7 @@ async function proxyRequest(req, res, targetUrl, redirectCount = 0) {
       const service = params.get('service') || 'git-upload-pack';
       const serviceType = service === 'git-upload-pack' ? 'upload' : 'receive';
       options.headers['Accept'] = `application/x-git-${serviceType}-pack-advertisement`;
+      options.headers['Git-Protocol'] = 'version=2';
     } else if (pathname.includes('git-upload-pack') || pathname.includes('git-receive-pack')) {
       const service = pathname.includes('upload-pack') ? 'upload' : 'receive';
       options.headers['Accept'] = `application/x-git-${service}-pack-result`;
