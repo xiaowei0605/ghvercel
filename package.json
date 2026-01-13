@@ -9,6 +9,6 @@
         "http-proxy-middleware": "^2.0.6"
     },
     "engines": {
-        "node": "18.x"
+        "node": "24.x"
     }
 }
