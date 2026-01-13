@@ -24,54 +24,79 @@ export default async function handler(req, res) {
   try {
     // 统一代理逻辑
     let targetUrl;
-
-    if (pathname.startsWith('/https:/') || pathname.startsWith('/http:/')) {
-      const protocolPath = pathname.substring(1);
-      const fixedUrl = protocolPath.replace(/^(https?):\/(?!\/)/, '$1://');
-      try {
-        new URL(fixedUrl);
-        targetUrl = fixedUrl;
-      } catch (e) {
-        console.log('URL修复失败:', e.message);
-      }
-    }
-    if (!targetUrl) {
-      if (pathname === '/proxy' && query.url) {
-        // 方式1: /proxy?url=encoded_github_url
-        let decodedUrl = decodeURIComponent(query.url);
-        // 检查是否已经有 https://
-        if (!decodedUrl.startsWith('http://') && !decodedUrl.startsWith('https://')) {
-          // 如果没有协议头，补充 https://
-          if (decodedUrl.startsWith('github.com/') || decodedUrl.startsWith('raw.githubusercontent.com/')) {
-            decodedUrl = 'https://' + decodedUrl;
-          } else {
-            // 默认当作 GitHub 路径
-            decodedUrl = 'https://github.com/' + decodedUrl;
-          }
-        }
-        targetUrl = decodedUrl;
-      } else if (pathname.startsWith('/github/')) {
-        // 方式2: /github/{完整的github路径}
-        const githubPath = pathname.replace('/github/', '');
-        if (!githubPath.startsWith('http://') && !githubPath.startsWith('https://')) {
-          // 如果没有协议头，补充 https://
-          targetUrl = 'https://' + githubPath;
+    if (pathname === '/proxy' && query.url) {
+      // 方式1: /proxy?url=encoded_github_url
+      let decodedUrl = decodeURIComponent(query.url);
+      // 检查是否已经有 https://
+      if (!decodedUrl.startsWith('http://') && !decodedUrl.startsWith('https://')) {
+        // 如果没有协议头，补充 https://
+        if (decodedUrl.startsWith('github.com/') || decodedUrl.startsWith('raw.githubusercontent.com/')) {
+          decodedUrl = 'https://' + decodedUrl;
         } else {
-          // 如果有协议头，直接使用
-          targetUrl = githubPath;
+          // 默认当作 GitHub 路径
+          decodedUrl = 'https://github.com/' + decodedUrl;
         }
+      }
+      targetUrl = decodedUrl;
+    } else if (pathname.startsWith('/github/') && pathname.length > '/github/'.length) {
+      // 方式2: /github/{完整的github路径}
+      const githubPath = pathname.replace('/github/', '');
+      const searchParams = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+      if (!githubPath.startsWith('http://') && !githubPath.startsWith('https://')) {
+        // 如果没有协议头，补充 https://
+        targetUrl = 'https://' + githubPath + searchParams;
       } else {
-        // 默认代理到 GitHub
-        const fullPath = pathname === '/' ? '' : pathname;
+        // 如果有协议头，直接使用
+        targetUrl = githubPath + searchParams;
+      }
+    } else {
+      // 默认代理到 GitHub
+      const fullPath = pathname === '/' ? '' : pathname;
 
-        let processedPath = fullPath;
-        if (processedPath.startsWith('/github.com/')) {
-          processedPath = processedPath.substring('/github.com'.length);
-        } else if (processedPath.startsWith('/https://github.com/')) {
-          // 添加对 https:// 前缀的处理
-          processedPath = processedPath.substring('/https:'.length);
-        }
+      console.log('原始路径:', fullPath);
 
+      let processedPath = fullPath;
+
+      // 统一处理各种格式的GitHub URL
+      if (processedPath.startsWith('/https:/github.com/')) {
+        // 处理 /https:/github.com/xxx 格式（单斜杠）
+        processedPath = 'https://' + processedPath.substring('/https:/'.length);
+        // 保留查询参数
+        const searchParams = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+        targetUrl = processedPath + searchParams;
+        console.log('处理为完整URL（单斜杠）:', targetUrl);
+      } else if (processedPath.startsWith('/https://github.com/')) {
+        // 处理 /https://github.com/xxx 格式（双斜杠）
+        processedPath = processedPath.substring('/https:'.length);
+        // 保留查询参数
+        const searchParams = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+        targetUrl = processedPath + searchParams;
+        console.log('处理为完整URL（双斜杠）:', targetUrl);
+      } else if (processedPath.startsWith('/http:/github.com/')) {
+        // 处理 /http:/github.com/xxx 格式（单斜杠）
+        processedPath = 'http://' + processedPath.substring('/http:/'.length);
+        // 保留查询参数
+        const searchParams = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+        targetUrl = processedPath + searchParams;
+        console.log('处理为完整URL（HTTP单斜杠）:', targetUrl);
+      } else if (processedPath.startsWith('/http://github.com/')) {
+        // 处理 /http://github.com/xxx 格式（双斜杠）
+        processedPath = processedPath.substring('/http:'.length);
+        // 保留查询参数
+        const searchParams = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+        targetUrl = processedPath + searchParams;
+        console.log('处理为完整URL（HTTP双斜杠）:', targetUrl);
+      } else if (processedPath.startsWith('/github.com/')) {
+        // 处理 /github.com/xxx 格式
+        processedPath = processedPath.substring('/github.com'.length);
+      }
+      if (targetUrl) {
+        console.log('通过协议前缀处理的URL:', targetUrl);
+      } else if (processedPath.startsWith('http://') || processedPath.startsWith('https://')) {
+        // 已经是完整URL，直接使用
+        targetUrl = processedPath + (req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '');
+      } else {
+        console.log('进入GitHub拼接逻辑');
         // 确保 Git 仓库路径以 .git 结尾
         let finalPath = processedPath;
         if (req.method === 'GET' &&
@@ -83,9 +108,21 @@ export default async function handler(req, res) {
           finalPath = processedPath + (processedPath.endsWith('/') ? '' : '/') + '.git';
         }
 
-        targetUrl = `https://github.com${finalPath}${req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''}`;
+        const searchParams = req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : '';
+        console.log('查询参数:', searchParams);
+        targetUrl = `https://github.com${finalPath}${searchParams}`;
+        console.log('GitHub拼接URL:', targetUrl);
       }
     }
+
+    console.log('最终目标URL:', targetUrl);
+
+    if (!targetUrl) {
+      console.error('无法确定目标URL，pathname:', pathname);
+      res.status(400).json({ error: 'Invalid request path', pathname });
+      return;
+    }
+
     // 执行代理
     await proxyRequest(req, res, targetUrl, 0);
 
@@ -177,11 +214,15 @@ async function proxyRequest(req, res, targetUrl, redirectCount = 0) {
       const serviceType = service === 'git-upload-pack' ? 'upload' : 'receive';
       options.headers['Accept'] = `application/x-git-${serviceType}-pack-advertisement`;
       options.headers['Git-Protocol'] = 'version=2';
+      options.headers['User-Agent'] = 'git/2.30.0';
     } else if (pathname.includes('git-upload-pack') || pathname.includes('git-receive-pack')) {
       const service = pathname.includes('upload-pack') ? 'upload' : 'receive';
       options.headers['Accept'] = `application/x-git-${service}-pack-result`;
       if (req.method === 'POST') {
         options.headers['Content-Type'] = `application/x-git-${service}-pack-request`;
+        if (req.headers['content-length']) {
+          options.headers['Content-Length'] = req.headers['content-length'];
+        }
       }
     }
   }
@@ -239,6 +280,9 @@ async function proxyRequest(req, res, targetUrl, redirectCount = 0) {
         headers['cache-control'] = 'no-cache';
         headers['expires'] = 'Fri, 01 Jan 1980 00:00:00 GMT';
         headers['pragma'] = 'no-cache';
+        if (proxyRes.headers['git-protocol']) {
+          headers['git-protocol'] = proxyRes.headers['git-protocol'];
+        }
       } else if (pathname.includes('git-upload-pack') || pathname.includes('git-receive-pack')) {
         const service = pathname.includes('upload-pack') ? 'upload' : 'receive';
         headers['content-type'] = `application/x-git-${service}-pack-result`;
@@ -259,9 +303,21 @@ async function proxyRequest(req, res, targetUrl, redirectCount = 0) {
   });
 
   proxyReq.on('error', (error) => {
-    console.error('Proxy request error:', error);
+    console.error('Proxy request error:', error.message, '目标URL:', targetUrl);
     if (!res.headersSent) {
-      res.status(502).json({ error: 'Proxy error' });
+      res.status(502).json({
+        error: 'Proxy error',
+        message: error.message,
+        target: targetUrl
+      });
+    }
+  });
+
+  proxyReq.setTimeout(30000, () => {
+    console.error('Proxy request timeout:', targetUrl);
+    proxyReq.destroy();
+    if (!res.headersSent) {
+      res.status(504).json({ error: 'Proxy timeout' });
     }
   });
 
