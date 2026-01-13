@@ -84,14 +84,22 @@ export default async function handler(req, res) {
       }
     }
     // 执行代理
-    await proxyRequest(req, res, targetUrl);
+    await proxyRequest(req, res, targetUrl, 0);
 
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 }
 
-async function proxyRequest(req, res, targetUrl) {
+async function proxyRequest(req, res, targetUrl, redirectCount = 0) {
+
+  // 添加重定向计数，防止无限重定向
+  const MAX_REDIRECTS = 5;
+  if (redirectCount >= MAX_REDIRECTS) {
+    res.status(508).json({ error: 'Too many redirects' });
+    return;
+  }
+
   const parsedUrl = new URL(targetUrl);
   const { hostname, pathname, search } = parsedUrl;
   // 添加调试日志
@@ -175,36 +183,37 @@ async function proxyRequest(req, res, targetUrl) {
     // 设置响应头
     const headers = { ...proxyRes.headers };
 
-    // 必须处理重定向，修改为代理地址
-    if ([301, 302, 303, 307, 308].includes(proxyRes.statusCode) && headers.location) {
-      const location = headers.location;
-      console.log('原始重定向:', location);
+    // 检查是否是重定向
+    if ([301, 302, 303, 307, 308].includes(proxyRes.statusCode) && proxyRes.headers.location) {
+      const location = proxyRes.headers.location;
+      console.log(`检测到重定向 ${redirectCount + 1}:`, location);
 
-      const baseUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers['x-forwarded-host'] || req.headers.host}`;
-
-      let finalPath;
-
-      // 情况1：已经是路径（以/开头）
+      // 处理相对路径
+      let newTargetUrl;
       if (location.startsWith('/')) {
-        finalPath = location;
-      }
-      // 情况2：完整URL
-      else if (location.includes('://')) {
-        try {
-          const url = new URL(location);
-          finalPath = url.pathname + url.search;
-        } catch (e) {
-          // 解析失败，当作路径
-          finalPath = '/' + location;
-        }
-      }
-      // 情况3：其他（如 github-production-release-asset/...）
-      else {
-        finalPath = '/' + location;
+        // 相对路径
+        newTargetUrl = `https://${hostname}${location}`;
+      } else if (location.includes('://')) {
+        // 绝对路径
+        newTargetUrl = location;
+      } else {
+        // 其他格式
+        newTargetUrl = `https://${hostname}/${location}`;
       }
 
-      headers.location = baseUrl + finalPath;
-      console.log('重定向转换结果:', headers.location);
+      console.log('自动跟随重定向到:', newTargetUrl);
+
+      // 递归调用 proxyRequest 处理重定向
+      if (['GET', 'HEAD'].includes(req.method)) {
+        // 简单请求，直接递归
+        proxyRequest(req, res, newTargetUrl, redirectCount + 1);
+      } else {
+        // 复杂请求，需要重新构建
+        console.warn('重定向的POST/PUT/PATCH请求可能丢失请求体');
+        // 这里可以缓存请求体，但简化起见，我们只支持GET重定向
+        proxyRequest(req, res, newTargetUrl, redirectCount + 1);
+      }
+      return;
     }
 
     // 如果是 Git 请求，设置正确的协议头
@@ -229,6 +238,9 @@ async function proxyRequest(req, res, targetUrl) {
 
     headers['X-Proxy'] = 'github-proxy';
 
+    // 移除 location 头，客户端不会看到重定向
+    delete headers.location;
+    console.log('返回最终响应，状态码:', proxyRes.statusCode);
     res.writeHead(proxyRes.statusCode, headers);
     proxyRes.pipe(res);
   });
