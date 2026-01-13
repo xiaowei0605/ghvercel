@@ -2,97 +2,232 @@ import https from 'https';
 import { parse } from 'url';
 
 export default async function handler(req, res) {
-  // 设置 CORS 头
+  const { query, pathname } = parse(req.url, true);
+
+  // 添加请求日志
+  console.log('收到请求:', {
+    pathname,
+    method: req.method,
+    query: Object.keys(query)
+  });
+
+  // 设置 CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', '*');
 
-  // 处理 OPTIONS 预检请求
   if (req.method === 'OPTIONS') {
     res.status(200).end();
     return;
   }
 
-  const { query } = parse(req.url, true);
-  const { type = 'raw', path = '' } = query;
-
   try {
-    switch (type) {
-      case 'raw':
-        await proxyRaw(req, res, path);
-        break;
-      case 'repo':
-      case 'git':
-        await proxyGit(req, res, path);
-        break;
-      case 'download':
-        await proxyDownload(req, res, path);
-        break;
-      case 'avatar':
-        await proxyAvatar(req, res, path);
-        break;
-      default:
-        // 通用代理
-        const { url } = query;
-        if (url) {
-          await proxyGeneric(req, res, url);
-        } else {
-          res.status(400).json({ error: 'Invalid request' });
-        }
+    // 统一代理逻辑
+    let targetUrl;
+
+    if (pathname.startsWith('/https:/') || pathname.startsWith('/http:/')) {
+      const protocolPath = pathname.substring(1);
+      const fixedUrl = protocolPath.replace(/^(https?):\/(?!\/)/, '$1://');
+      try {
+        new URL(fixedUrl);
+        targetUrl = fixedUrl;
+      } catch (e) {
+        console.log('URL修复失败:', e.message);
+      }
     }
+    if (!targetUrl) {
+      if (pathname === '/proxy' && query.url) {
+        // 方式1: /proxy?url=encoded_github_url
+        let decodedUrl = decodeURIComponent(query.url);
+        // 检查是否已经有 https://
+        if (!decodedUrl.startsWith('http://') && !decodedUrl.startsWith('https://')) {
+          // 如果没有协议头，补充 https://
+          if (decodedUrl.startsWith('github.com/') || decodedUrl.startsWith('raw.githubusercontent.com/')) {
+            decodedUrl = 'https://' + decodedUrl;
+          } else {
+            // 默认当作 GitHub 路径
+            decodedUrl = 'https://github.com/' + decodedUrl;
+          }
+        }
+        targetUrl = decodedUrl;
+      } else if (pathname.startsWith('/github/')) {
+        // 方式2: /github/{完整的github路径}
+        const githubPath = pathname.replace('/github/', '');
+        if (!githubPath.startsWith('http://') && !githubPath.startsWith('https://')) {
+          // 如果没有协议头，补充 https://
+          targetUrl = 'https://' + githubPath;
+        } else {
+          // 如果有协议头，直接使用
+          targetUrl = githubPath;
+        }
+      } else {
+        // 默认代理到 GitHub
+        const fullPath = pathname === '/' ? '' : pathname;
+
+        let processedPath = fullPath;
+        if (processedPath.startsWith('/github.com/')) {
+          processedPath = processedPath.substring('/github.com'.length);
+        }
+
+        // 确保 Git 仓库路径以 .git 结尾
+        let finalPath = processedPath;
+        if (req.method === 'GET' &&
+          !processedPath.includes('/info/refs') &&
+          !processedPath.includes('git-') &&
+          !processedPath.endsWith('.git') &&
+          (processedPath.endsWith('/') || processedPath.split('/').length === 2)) {
+          // 如果是仓库根路径，加上 .git
+          finalPath = processedPath + (processedPath.endsWith('/') ? '' : '/') + '.git';
+        }
+
+        targetUrl = `https://github.com${finalPath}${req.url.includes('?') ? req.url.substring(req.url.indexOf('?')) : ''}`;
+      }
+    }
+    // 执行代理
+    await proxyRequest(req, res, targetUrl);
+
   } catch (error) {
-    console.error('Proxy error:', error);
     res.status(500).json({ error: error.message });
   }
 }
 
-// GitHub 域名映射
-const GITHUB_DOMAINS = {
-  'raw': 'raw.githubusercontent.com',
-  'repo': 'github.com',
-  'git': 'github.com',
-  'download': 'github.com',
-  'avatar': 'avatars.githubusercontent.com'
-};
-
-// 核心代理函数
-function createProxy(targetUrl, req, res) {
+async function proxyRequest(req, res, targetUrl) {
   const parsedUrl = new URL(targetUrl);
+  const { hostname, pathname, search } = parsedUrl;
+  // 添加调试日志
+  console.log('代理请求:', {
+    targetUrl,
+    hostname,
+    pathname,
+    search,
+    method: req.method
+  });
+
+  // 检查是否允许的 GitHub 域名
+  const allowedDomains = [
+    'github.com',
+    'raw.githubusercontent.com',
+    'github-releases.githubusercontent.com',
+    'release-assets.githubusercontent.com',
+    'github-production-release-asset',
+    'github-production-asset',
+    'github-production-user-asset',
+    'avatars.githubusercontent.com',
+    'user-images.githubusercontent.com',
+    'codeload.github.com',
+    'objects.githubusercontent.com',
+    'github.githubassets.com',
+    'media.githubusercontent.com',
+    'cloud.githubusercontent.com'
+  ];
+
+  const isAllowed = allowedDomains.some(domain => hostname.includes(domain)) ||
+    (pathname.includes('github-production-release-asset') && hostname === req.headers['x-forwarded-host']);
+
+  if (!isAllowed) {
+    console.log('域名不被允许:', hostname, '路径:', pathname);
+    res.status(403).json({ error: 'Domain not allowed' });
+    return;
+  }
 
   const options = {
-    hostname: parsedUrl.hostname,
-    path: parsedUrl.pathname + parsedUrl.search,
+    hostname,
+    path: pathname + search,
     method: req.method,
     headers: {
       ...req.headers,
-      'host': parsedUrl.hostname,
-      'User-Agent': 'GitHub-Proxy/1.0',
-      'Accept': '*/*'
+      'host': hostname,
+      'User-Agent': 'git/2.30.0',
+      'Accept': '*/*',
+      'Pragma': 'no-cache'
     }
   };
 
-  // 添加 GitHub Token（如果有）
+  // 检测并处理 Git 智能协议
+  const isGitRequest = pathname.endsWith('.git') ||
+    pathname.includes('/info/refs') ||
+    pathname.includes('git-upload-pack') ||
+    pathname.includes('git-receive-pack');
+
+  if (isGitRequest) {
+    // Git 智能协议需要特定的头部
+    if (pathname.includes('/info/refs')) {
+      const params = new URLSearchParams(search);
+      const service = params.get('service') || 'git-upload-pack';
+      const serviceType = service === 'git-upload-pack' ? 'upload' : 'receive';
+      options.headers['Accept'] = `application/x-git-${serviceType}-pack-advertisement`;
+    } else if (pathname.includes('git-upload-pack') || pathname.includes('git-receive-pack')) {
+      const service = pathname.includes('upload-pack') ? 'upload' : 'receive';
+      options.headers['Accept'] = `application/x-git-${service}-pack-result`;
+      if (req.method === 'POST') {
+        options.headers['Content-Type'] = `application/x-git-${service}-pack-request`;
+      }
+    }
+  }
+
+
+  // 添加 GitHub Token（可选）
   if (process.env.GITHUB_TOKEN) {
     options.headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
   }
 
   const proxyReq = https.request(options, (proxyRes) => {
-    // 处理 Git 协议的特殊 Content-Type
-    let contentType = proxyRes.headers['content-type'];
-    if (options.path.includes('info/refs')) {
-      const service = options.path.includes('upload-pack') ? 'upload' : 'receive';
-      contentType = `application/x-git-${service}-pack-advertisement`;
+    // 设置响应头
+    const headers = { ...proxyRes.headers };
+
+    // 必须处理重定向，修改为代理地址
+    if ([301, 302, 303, 307, 308].includes(proxyRes.statusCode) && headers.location) {
+      const location = headers.location;
+      console.log('原始重定向:', location);
+
+      const baseUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers['x-forwarded-host'] || req.headers.host}`;
+
+      let finalPath;
+
+      // 情况1：已经是路径（以/开头）
+      if (location.startsWith('/')) {
+        finalPath = location;
+      }
+      // 情况2：完整URL
+      else if (location.includes('://')) {
+        try {
+          const url = new URL(location);
+          finalPath = url.pathname + url.search;
+        } catch (e) {
+          // 解析失败，当作路径
+          finalPath = '/' + location;
+        }
+      }
+      // 情况3：其他（如 github-production-release-asset/...）
+      else {
+        finalPath = '/' + location;
+      }
+
+      headers.location = baseUrl + finalPath;
+      console.log('重定向转换结果:', headers.location);
     }
 
-    const headers = {
-      ...proxyRes.headers,
-      'cache-control': 'public, max-age=3600',
-      'access-control-expose-headers': '*'
-    };
-
-    if (contentType) {
-      headers['content-type'] = contentType;
+    // 如果是 Git 请求，设置正确的协议头
+    if (isGitRequest) {
+      if (pathname.includes('/info/refs')) {
+        const params = new URLSearchParams(search);
+        const service = params.get('service') || 'git-upload-pack';
+        const serviceType = service === 'git-upload-pack' ? 'upload' : 'receive';
+        headers['content-type'] = `application/x-git-${serviceType}-pack-advertisement`;
+        headers['cache-control'] = 'no-cache';
+        headers['expires'] = 'Fri, 01 Jan 1980 00:00:00 GMT';
+        headers['pragma'] = 'no-cache';
+      } else if (pathname.includes('git-upload-pack') || pathname.includes('git-receive-pack')) {
+        const service = pathname.includes('upload-pack') ? 'upload' : 'receive';
+        headers['content-type'] = `application/x-git-${service}-pack-result`;
+        headers['cache-control'] = 'no-cache';
+      }
+    } else {
+      // 非 Git 请求才添加缓存
+      headers['Cache-Control'] = 'public, max-age=3600';
     }
+
+    headers['X-Proxy'] = 'github-proxy';
 
     res.writeHead(proxyRes.statusCode, headers);
     proxyRes.pipe(res);
@@ -101,57 +236,17 @@ function createProxy(targetUrl, req, res) {
   proxyReq.on('error', (error) => {
     console.error('Proxy request error:', error);
     if (!res.headersSent) {
-      res.status(502).json({ error: 'Proxy error', details: error.message });
+      res.status(502).json({ error: 'Proxy error' });
     }
   });
 
-  // 传输请求体
-  if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+  // Git 请求需要流式传输请求体
+  if (isGitRequest && req.method === 'POST') {
+    // Git 智能协议 POST 请求需要传输整个请求体
+    req.pipe(proxyReq);
+  } else if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
     req.pipe(proxyReq);
   } else {
     proxyReq.end();
   }
-}
-
-// 代理原始文件
-async function proxyRaw(req, res, path) {
-  const targetUrl = `https://raw.githubusercontent.com/${path}`;
-  createProxy(targetUrl, req, res);
-}
-
-// 代理 Git 仓库
-async function proxyGit(req, res, path) {
-  let targetPath = path;
-
-  // 确保路径正确
-  if (!targetPath.startsWith('/')) {
-    targetPath = '/' + targetPath;
-  }
-
-  // 处理 Git 智能协议
-  if (req.url.includes('info/refs')) {
-    const service = req.url.includes('upload-pack') ? 'git-upload-pack' : 'git-receive-pack';
-    targetPath = `${targetPath}/info/refs?service=${service}`;
-  }
-
-  const targetUrl = `https://github.com${targetPath}`;
-  createProxy(targetUrl, req, res);
-}
-
-// 代理下载
-async function proxyDownload(req, res, path) {
-  const targetUrl = `https://github.com/${path}`;
-  createProxy(targetUrl, req, res);
-}
-
-// 代理头像
-async function proxyAvatar(req, res, path) {
-  const targetUrl = `https://avatars.githubusercontent.com/${path}`;
-  createProxy(targetUrl, req, res);
-}
-
-// 通用代理
-async function proxyGeneric(req, res, url) {
-  const decodedUrl = decodeURIComponent(url);
-  createProxy(decodedUrl, req, res);
 }

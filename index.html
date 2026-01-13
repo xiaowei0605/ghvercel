@@ -1,11 +1,277 @@
 <!DOCTYPE html>
-<html>
-<head>
-    <title>GitHub 文件代理</title>
-</head>
-<body>
-    <h1>GitHub 文件代理服务</h1>
-    <p>使用示例：</p>
-    <code>https://your-vercel-app.vercel.app/api/用户名/仓库/分支/文件路径</code>
-</body>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GitHub 资源代理服务</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+    />
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
+          Arial, sans-serif;
+        line-height: 1.6;
+        color: #24292e;
+        background-color: #f6f8fa;
+        padding: 20px;
+        max-width: 900px;
+        margin: 0 auto;
+      }
+
+      .header {
+        text-align: center;
+        margin-bottom: 30px;
+        padding: 25px 0;
+        border-bottom: 1px solid #e1e4e8;
+      }
+
+      .logo {
+        font-size: 2.2rem;
+        color: #24292e;
+        margin-bottom: 10px;
+      }
+
+      .logo i {
+        color: #28a745;
+        margin-right: 10px;
+      }
+
+      .card {
+        background: white;
+        border-radius: 8px;
+        padding: 25px;
+        margin-bottom: 25px;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+        border: 1px solid #e1e4e8;
+      }
+
+      .card h3 {
+        font-size: 1.3rem;
+        margin-bottom: 15px;
+        color: #24292e;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .card h3 i {
+        color: #0366d6;
+      }
+
+      .example {
+        background-color: #f6f8fa;
+        border-radius: 6px;
+        padding: 15px;
+        margin: 15px 0;
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo,
+          monospace;
+        font-size: 0.9rem;
+        overflow-x: auto;
+        border-left: 3px solid #28a745;
+      }
+
+      .example a {
+        color: #0366d6;
+        text-decoration: none;
+      }
+
+      .example a:hover {
+        text-decoration: underline;
+      }
+
+      .input-group {
+        margin: 20px 0;
+      }
+
+      .url-input {
+        width: 100%;
+        padding: 12px 15px;
+        border: 1px solid #e1e4e8;
+        border-radius: 6px;
+        font-size: 1rem;
+        font-family: "SFMono-Regular", Consolas, monospace;
+        margin-bottom: 10px;
+      }
+
+      .url-input:focus {
+        outline: none;
+        border-color: #0366d6;
+        box-shadow: 0 0 0 3px rgba(3, 102, 214, 0.1);
+      }
+
+      .btn {
+        display: inline-block;
+        background-color: #28a745;
+        color: white;
+        padding: 12px 24px;
+        border: none;
+        border-radius: 6px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        text-decoration: none;
+        transition: background-color 0.2s;
+        width: 100%;
+        text-align: center;
+      }
+
+      .btn:hover {
+        background-color: #22863a;
+      }
+
+      .btn i {
+        margin-right: 8px;
+      }
+
+      .footer {
+        text-align: center;
+        margin-top: 40px;
+        padding-top: 25px;
+        border-top: 1px solid #e1e4e8;
+        color: #586069;
+        font-size: 0.9rem;
+      }
+
+      .proxy-form {
+        margin-top: 10px;
+      }
+
+      .note {
+        background-color: #fff8c5;
+        border: 1px solid #f0c929;
+        border-radius: 6px;
+        padding: 12px;
+        margin: 30px 0 15px 0;
+        font-size: 0.9rem;
+      }
+
+      .note strong {
+        color: #d73a49;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <div class="logo"><i class="fab fa-github"></i> GitHub Proxy</div>
+    </div>
+
+    <div class="card">
+      <h3><i class="fas fa-download"></i> 快速下载</h3>
+      <p>输入 GitHub 文件链接，直接通过代理下载：</p>
+      <div class="input-group">
+        <div class="proxy-form">
+          <input
+            type="text"
+            id="githubUrl"
+            class="url-input"
+            placeholder="例如：https://codeload.github.com/ExceptionsOccur/ghvercel/zip/refs/heads/main"
+          />
+          <button onclick="directDownload()" class="btn">
+            <i class="fas fa-download"></i> 直接下载
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3><i class="fas fa-question-circle"></i> 使用说明</h3>
+
+      <div class="example">
+        <strong>Git Clone：</strong><br />
+        git clone https://<span id="domainPlaceholder"
+          >your-domain.vercel.app</span
+        >/https://github.com/ExceptionsOccur/ghvercel.git<br /><br />
+        <strong>wget：</strong><br />
+        wget https://<span id="domainPlaceholder">your-domain.vercel.app</span
+        >/https://codeload.github.com/ExceptionsOccur/ghvercel/zip/refs/heads/main.zip<br /><br />
+        <strong>curl：</strong><br />
+        curl -LO https://<span id="domainPlaceholder"
+          >your-domain.vercel.app</span
+        >/https://codeload.github.com/ExceptionsOccur/ghvercel/zip/refs/heads/main.zip
+      </div>
+
+      <div class="note">
+        <strong>注意事项：</strong> 本服务基于 Vercel
+        免费套餐，有每月使用限制(100GB)，仅用于个人开发或测试用途。
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>GitHub Proxy Service | 基于 Vercel Serverless Functions 构建</p>
+      <p>本服务仅用于技术学习和开发测试</p>
+    </div>
+
+    <script>
+      // 获取当前域名
+      const currentDomain = window.location.hostname;
+      document.getElementById("domainPlaceholder").textContent = currentDomain;
+
+      // GitHub允许的域名列表
+      const allowedGitHubDomains = [
+        "github.com",
+        "raw.githubusercontent.com",
+        "github-releases.githubusercontent.com",
+        "avatars.githubusercontent.com",
+        "user-images.githubusercontent.com",
+        "codeload.github.com",
+        "objects.githubusercontent.com",
+      ];
+
+      // 直接下载功能
+      function directDownload() {
+        const url = document.getElementById("githubUrl").value.trim();
+        if (!url) return alert("请输入GitHub链接");
+
+        // 验证 URL 格式
+        try {
+          new URL(url);
+        } catch (e) {
+          return alert("请输入有效的URL");
+        }
+
+        // 检查域名是否为允许的 GitHub 相关域名
+        const parsedUrl = new URL(url);
+        const hostname = parsedUrl.hostname;
+
+        let isGitHubDomain = false;
+        for (const allowedDomain of allowedGitHubDomains) {
+          if (
+            hostname.includes(allowedDomain) ||
+            allowedDomain.includes(hostname)
+          ) {
+            isGitHubDomain = true;
+            break;
+          }
+        }
+
+        if (!isGitHubDomain) {
+          alert("仅支持GitHub相关域名");
+          return;
+        }
+
+        // 使用 /proxy 接口，URL 参数形式传递目标地址
+        const encodedUrl = encodeURIComponent(url);
+        const proxyUrl = `${window.location.origin}/proxy?url=${encodedUrl}`;
+        console.log("代理链接:", proxyUrl);
+        window.open(proxyUrl, "_blank");
+      }
+
+      // 按Enter键直接下载
+      document
+        .getElementById("githubUrl")
+        .addEventListener("keypress", function (e) {
+          if (e.key === "Enter") {
+            directDownload();
+          }
+        });
+    </script>
+  </body>
 </html>

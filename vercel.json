@@ -1,37 +1,17 @@
 {
     "functions": {
-        "api/**/*.js": {
-            "runtime": "nodejs20.x"
+        "api/github-proxy.js": {
+            "maxDuration": 30
         }
     },
     "rewrites": [
         {
             "source": "/",
-            "dest": "/index.html"
+            "destination": "/index.html"
         },
         {
-            "source": "/raw/(.*)",
-            "dest": "/api/github-proxy?type=raw&path=$1"
-        },
-        {
-            "source": "/repo/(.*)",
-            "dest": "/api/github-proxy?type=repo&path=$1"
-        },
-        {
-            "source": "/git/(.*)",
-            "dest": "/api/github-proxy?type=git&path=$1"
-        },
-        {
-            "source": "/download/(.*)",
-            "dest": "/api/github-proxy?type=download&path=$1"
-        },
-        {
-            "source": "/avatar/(.*)",
-            "dest": "/api/github-proxy?type=avatar&path=$1"
-        },
-        {
-            "source": "/api/proxy",
-            "dest": "/api/github-proxy"
+            "source": "/(.*)",
+            "destination": "/api/github-proxy"
         }
     ]
 }
