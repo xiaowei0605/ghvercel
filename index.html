@@ -186,14 +186,15 @@
 
       <div class="example">
         <strong>Git Clone：</strong><br />
-        git clone https://<span id="domainPlaceholder"
+        git clone https://<span class="domainPlaceholder"
           >your-domain.vercel.app</span
         >/https://github.com/ExceptionsOccur/ghvercel.git<br /><br />
         <strong>wget：</strong><br />
-        wget https://<span id="domainPlaceholder">your-domain.vercel.app</span
+        wget https://<span class="domainPlaceholder"
+          >your-domain.vercel.app</span
         >/https://codeload.github.com/ExceptionsOccur/ghvercel/zip/refs/heads/main.zip<br /><br />
         <strong>curl：</strong><br />
-        curl -LO https://<span id="domainPlaceholder"
+        curl -LO https://<span class="domainPlaceholder"
           >your-domain.vercel.app</span
         >/https://codeload.github.com/ExceptionsOccur/ghvercel/zip/refs/heads/main.zip
       </div>
@@ -212,7 +213,10 @@
     <script>
       // 获取当前域名
       const currentDomain = window.location.hostname;
-      document.getElementById("domainPlaceholder").textContent = currentDomain;
+      const placeholders = document.querySelectorAll(".domainPlaceholder");
+      placeholders.forEach((span) => {
+        span.textContent = currentDomain;
+      });
 
       // GitHub允许的域名列表
       const allowedGitHubDomains = [
