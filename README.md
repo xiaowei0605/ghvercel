@@ -41,7 +41,7 @@
 2. **克隆项目**
 
    ```bash
-   git clone https://github.com/your-username/ghvercel.git
+   git clone https://github.com/ExceptionsOccur/ghvercel.git
    cd ghvercel
    ```
 
